@@ -14,6 +14,7 @@ import os
 import SocketServer
 import signal
 import argparse
+import random
 PORT = 8888
 
 # inspired from DNSChef
@@ -195,7 +196,7 @@ class A(DNSResponse):
         super(A, self).__init__(query)
         self.type = "\x00\x01"
         self.length = "\x00\x04"
-        self.records = records
+        self.records = records if len(records) < 5 else random.sample(records,5)
         self.data = ''
         self.q = query
 
