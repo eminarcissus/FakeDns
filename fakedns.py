@@ -1,8 +1,8 @@
 #!/usr/bin/python
-"""													"""
-"""                    Fakedns.py					"""
-"""    A regular-expression based DNS MITM Server	"""
-"""						by: Crypt0s					"""
+"""                                                    """
+"""                    Fakedns.py                    """
+"""    A regular-expression based DNS MITM Server    """
+"""                        by: Crypt0s                    """
 
 import pdb
 import threading
@@ -14,6 +14,7 @@ import os
 import SocketServer
 import signal
 import argparse
+PORT = 8888
 
 # inspired from DNSChef
 
@@ -149,7 +150,7 @@ class DNSResponse(object):
         self.flags = "\x81\x80"         # No errors, we never have those.
         self.questions = query.data[4:6]  # Number of questions asked...
         # Answer RRs (Answer resource records contained in response) 1 for now.
-        self.rranswers = "\x00\x01"
+        self.rranswers = lambda :"\x00"+chr(len(self.records)) if len(self.records) > 1 else "\x00\x01"
         self.rrauthority = "\x00\x00"   # Same but for authority
         self.rradditional = "\x00\x00"  # Same but for additionals.
         # Include the question section
@@ -164,13 +165,23 @@ class DNSResponse(object):
         # Set by subclass because is variable except in A/AAAA records.
         self.length = None
         self.data = None                # Same as above.
+        self.records = []
+        self.request = None
 
     def make_packet(self):
         try:
-            self.packet = self.id + self.flags + self.questions + self.rranswers + self.rrauthority + \
-                self.rradditional + self.query + self.pointer + self.type + \
-                self.dnsclass + self.ttl + self.length + self.data
-        except:
+            if not self.data and self.records:
+                self.packet = self.id + self.flags + self.questions + self.rranswers() + self.rrauthority + \
+                        self.rradditional + self.query 
+                for record in self.records:
+                    o =  self.pointer + self.type + \
+                        self.dnsclass + self.ttl + self.length + self.get_ip(record,self.q)
+                    self.packet += o
+            else:
+                self.packet = self.id + self.flags + self.questions + self.rranswers + self.rrauthority + \
+                    self.rradditional + self.query + self.pointer + self.type + \
+                    self.dnsclass + self.ttl + self.length + self.data
+        except Exception,e:
             pdb.set_trace()
         return self.packet
 
@@ -180,11 +191,13 @@ class DNSResponse(object):
 
 class A(DNSResponse):
 
-    def __init__(self, query, record):
+    def __init__(self, query, records):
         super(A, self).__init__(query)
         self.type = "\x00\x01"
         self.length = "\x00\x04"
-        self.data = self.get_ip(record, query)
+        self.records = records
+        self.data = ''
+        self.q = query
 
     def get_ip(self, dns_record, query):
         ip = dns_record
@@ -321,7 +334,7 @@ class ruleEngine:
                         ip = socket.gethostbyname(socket.gethostname())
                     except:
                         print ">> Could not get your IP address from your DNS Server."
-                        ip = '127.0.0.1'
+                        ip = '0.0.0.0'
                     splitrule[2] = ip
 
                 # things after the third element will be dnsrebind args
@@ -358,8 +371,7 @@ class ruleEngine:
                         response_data = rule[2]
                     else:
                         response_data = rule[2]
-
-                    response = CASE[query.type](query, response_data)
+                    response = CASE[query.type](query, rule[2:])
                     print ">> Matched Request - " + query.dominio
                     return response.make_packet()
 
@@ -370,7 +382,7 @@ class ruleEngine:
             # to our DNS server.
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.settimeout(3.0)
-            addr = ('8.8.8.8', 53)
+            addr = ('8.8.8.8', PORT)
             s.sendto(query.data, addr)
             data = s.recv(1024)
             s.close()
@@ -405,10 +417,14 @@ if __name__ == '__main__':
                         help='Path to configuration file', required=True)
     parser.add_argument('-i', dest='iface', action='store',
                         help='IP address you wish to run FakeDns with - default all', default='0.0.0.0', required=False)
+    parser.add_argument('-p', dest='port', action='store',
+                        help='port binding to', default=PORT, required=False)
     parser.add_argument('--rebind', dest='rebind', action='store_true', required=False, default=False,
                         help="Enable DNS rebinding attacks - responds with one result the first request, and another result on subsequent requests")
 
     args = parser.parse_args()
+    if args.port != PORT:
+        PORT = args.port
 
     # Default config file path.
     path = args.path
@@ -420,12 +436,12 @@ if __name__ == '__main__':
     re_list = rules.re_list
 
     interface = args.iface
-    port = 53
+    port = PORT
 
     try:
         server = ThreadedUDPServer((interface, int(port)), UDPHandler)
     except:
-        print ">> Could not start server -- is another program on udp:53?"
+        print ">> Could not start server -- is another program on udp:%s?" %PORT
         exit(1)
 
     server.daemon = True
